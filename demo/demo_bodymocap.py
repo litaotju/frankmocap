@@ -6,6 +6,8 @@ import os.path as osp
 import torch
 from torchvision.transforms import Normalize
 import numpy as np
+import queue
+import threading
 import cv2
 import argparse
 import json
@@ -22,6 +24,27 @@ from mocap_utils.timer import Timer
 import renderer.image_utils as imu
 from renderer.viewer2D import ImShow
 
+q = queue.Queue()
+
+def visualize(visualizer, args):
+
+    while(True):
+        img, pred_mesh_list, body_bbox_list, image_path = q.get()
+        torch.cuda.nvtx.range_push("Visualize")
+        res_img = visualizer.visualize(
+            img,
+            pred_mesh_list = pred_mesh_list, 
+            body_bbox_list = body_bbox_list)
+        torch.cuda.nvtx.range_pop()
+        q.task_done()
+        if not args.no_display:
+            res_img = res_img.astype(np.uint8)
+            ImShow(res_img)
+        if args.save_frame and args.out_dir is not None:
+            demo_utils.save_res_img(args.out_dir, image_path, res_img)
+
+
+
 def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
     #Setup input data to handle different types of inputs
     input_type, input_data = demo_utils.setup_input(args)
@@ -29,6 +52,9 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
     cur_frame = args.start_frame
     video_frame = 0
     timer = Timer()
+
+    threading.Thread(target=visualize, args=(visualizer, args), daemon=True).start()
+
     while True:
         timer.tic()
         # load data
@@ -132,22 +158,8 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
         pred_mesh_list = demo_utils.extract_mesh_from_output(pred_output_list)
 
         torch.cuda.nvtx.range_pop()
-        torch.cuda.nvtx.range_push("Visualize")
-        # visualization
-        res_img = visualizer.visualize(
-            img_original_bgr,
-            pred_mesh_list = pred_mesh_list, 
-            body_bbox_list = body_bbox_list)
-        torch.cuda.nvtx.range_pop()
- 
-        # show result in the screen
-        if not args.no_display:
-            res_img = res_img.astype(np.uint8)
-            ImShow(res_img)
 
-        # save result image
-        if args.save_frame and args.out_dir is not None:
-            demo_utils.save_res_img(args.out_dir, image_path, res_img)
+        q.put((img_original_bgr, pred_mesh_list, body_bbox_list, image_path))
 
         # save predictions to pkl
         if args.save_pred_pkl:
@@ -158,6 +170,7 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
         timer.toc(bPrint=True,title="Time")
         print(f"Processed : {image_path}")
 
+    q.join()
     #save images as a video
     if not args.no_video_out and input_type in ['video', 'webcam']:
         demo_utils.gen_video_out(args.out_dir, args.seq_name)
