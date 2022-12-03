@@ -5,6 +5,8 @@ import os.path as osp
 import sys
 import numpy as np
 import cv2
+from typing import List
+import math
 
 import torch
 import torchvision.transforms as transforms
@@ -40,10 +42,8 @@ class BodyPoseEstimator(object):
         net = net.eval()
         net = net.cuda()
         self.model = net
-    
 
-    #Code from https://github.com/Daniil-Osokin/lightweight-human-pose-estimation.pytorch/demo.py
-    def __infer_fast(self, img, input_height_size, stride, upsample_ratio, 
+    def __infer_fast_old(self, img, input_height_size, stride, upsample_ratio, 
         cpu=False, pad_value=(0, 0, 0), img_mean=(128, 128, 128), img_scale=1/256):
         height, width, _ = img.shape
         scale = input_height_size / height
@@ -68,6 +68,60 @@ class BodyPoseEstimator(object):
         pafs = cv2.resize(pafs, (0, 0), fx=upsample_ratio, fy=upsample_ratio, interpolation=cv2.INTER_CUBIC)
 
         return heatmaps, pafs, scale, pad
+
+    @staticmethod
+    def pad_width(img, stride:int, pad_value:float, min_dims:List[int]):
+        c, h, w = img.shape
+
+        h = min(min_dims[0], h)
+        min_dims[0] = math.ceil(min_dims[0] / float(stride)) * stride
+        min_dims[1] = max(min_dims[1], w)
+        min_dims[1] = math.ceil(min_dims[1] / float(stride)) * stride
+        pad:List[int] = []
+        pad.append(int(math.floor((min_dims[0] - h) / 2.0)))
+        pad.append(int(math.floor((min_dims[1] - w) / 2.0)))
+        pad.append(int(min_dims[0] - h - pad[0]))
+        pad.append(int(min_dims[1] - w - pad[1]))
+        assert isinstance(img, torch.Tensor)
+        padded_img = torch.functional.F.pad(img, (pad[1], pad[3], pad[0], pad[2]), mode='constant', value=pad_value)
+        return padded_img, pad
+
+
+    #Code from https://github.com/Daniil-Osokin/lightweight-human-pose-estimation.pytorch/demo.py
+    @torch.no_grad()
+    def __infer_fast(self, img, input_height_size:int, stride:int, upsample_ratio:int, 
+         pad_value:float=0., img_mean:int=128, img_scale:float=1/256):
+        height, width, _ = img.shape
+        scale = input_height_size / height
+        org_img = img
+        img = torch.from_numpy(img).cuda().float()
+        # opencv is HWC format, but pytorch is NCHW format
+        img = img.permute(2, 0, 1).unsqueeze(0)
+        img = torch.nn.functional.interpolate(img, scale_factor=[scale, scale], mode='bicubic').squeeze(0)
+        scaled_img = (img - img_mean) * img_scale
+        min_dims = [input_height_size, max(scaled_img.shape[1], input_height_size)]
+        padded_img, pad = BodyPoseEstimator.pad_width(scaled_img, stride, pad_value, min_dims)
+
+        tensor_img = padded_img.unsqueeze(0)
+        stages_output = self.model(tensor_img)
+
+        stage2_heatmaps = stages_output[-2]
+        heatmaps = torch.nn.functional.interpolate(stage2_heatmaps, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).cpu().numpy()
+
+        stage2_pafs = stages_output[-1]
+        pafs = torch.nn.functional.interpolate(stage2_pafs, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).cpu().numpy()
+
+        DEBUG = 0
+        if DEBUG:
+            _heatmaps, _pafs, _scale, _pad = self.__infer_fast_old(org_img, 
+                input_height_size=256, stride=stride, upsample_ratio=upsample_ratio)
+
+            assert np.allclose(heatmaps, _heatmaps, atol=0.05, rtol=0.05), f"{heatmaps.min()} {_heatmaps.min()}"
+            assert np.allclose(pafs, _pafs, atol=0.05, rtol=0.05), f"{pafs.min()} {_pafs.min()}"
+            assert np.allclose(scale, _scale,atol=0.05, rtol=0.05), f"{scale} {_scale}"
+            assert np.allclose(pad, _pad, atol=0.05, rtol=0.05), f"{pad} {_pad}"
+
+        return heatmaps, pafs, scale, pad
     
     def detect_body_pose(self, img):
         """
@@ -82,6 +136,7 @@ class BodyPoseEstimator(object):
         heatmaps, pafs, scale, pad = self.__infer_fast(img, 
             input_height_size=256, stride=stride, upsample_ratio=upsample_ratio)
 
+        torch.cuda.nvtx.range_push("infer postprocess")
         total_keypoints_num = 0
         all_keypoints_by_type = []
         num_keypoints = Pose.num_kpts
@@ -100,7 +155,9 @@ class BodyPoseEstimator(object):
             print("We only support one person currently")
             # assert len(pose_entries) == 1, "We only support one person currently"
         '''
+        torch.cuda.nvtx.range_pop()
 
+        torch.cuda.nvtx.range_push("infer postprocess2")
         current_poses, current_bbox = list(), list()
         for n in range(len(pose_entries)):
             if len(pose_entries[n]) == 0:
@@ -126,4 +183,5 @@ class BodyPoseEstimator(object):
             y1 = min(y+h+y_margin, orig_img.shape[0])
             current_bbox[i] = np.array((x0, y0, x1-x0, y1-y0)).astype(np.int32)
 
+        torch.cuda.nvtx.range_pop()
         return current_poses, current_bbox
