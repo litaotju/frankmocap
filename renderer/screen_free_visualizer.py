@@ -8,6 +8,7 @@ import sys
 import numpy as np
 import cv2
 import pdb
+import torch
 from .image_utils import draw_raw_bbox, draw_hand_bbox, draw_body_bbox, draw_arm_pose
 
 # To use screen_free visualizer. Either OpenDR or Pytorch3D should be installed.
@@ -53,10 +54,10 @@ class Visualizer(object):
         assert max(img_original.shape) <= self.input_size, \
             f"Currently, we donlt support images size larger than:{self.input_size}"
 
-        res_img = img_original.copy()
-        rend_img = np.ones((self.input_size, self.input_size, 3))
+        res_img = torch.from_numpy(img_original).to('cuda') # img_original.copy()
         h, w = img_original.shape[:2]
-        rend_img[:h, :w, :] = img_original
+        rend_img = torch.ones((self.input_size, self.input_size, 3), device=torch.device('cuda'))
+        rend_img[:h, :w, :] = res_img
 
         for mesh in pred_mesh_list:
             verts = mesh['vertices']
@@ -79,7 +80,7 @@ class Visualizer(object):
         vis_hand_bbox = True,
     ):
         # init
-        res_img = input_img.copy()
+        # res_img = input_img.copy()
 
         # draw raw hand bboxes
         if raw_hand_bboxes is not None and vis_raw_hand_bbox:

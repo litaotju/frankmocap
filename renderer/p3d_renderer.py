@@ -7,6 +7,7 @@ import os
 import sys
 import torch
 import numpy as np
+import torchvision
 
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer.mesh import Textures
@@ -156,17 +157,25 @@ class Pytorch3dRenderer(object):
         mesh_color = self.mesh_color.repeat(1, verts.shape[0], 1)
         textures = Textures(verts_rgb = mesh_color)
 
+        torch.cuda.nvtx.range_push("Meshes")
         # rendering
         mesh = Meshes(verts=verts_tensor, faces=faces_tensor, textures=textures)
+        torch.cuda.nvtx.range_pop()
 
+        torch.cuda.nvtx.range_push("Render")
         # blending rendered mesh with background image
         rend_img = renderer(mesh)
-        rend_img = rend_img[0].cpu().numpy()
+        torch.cuda.nvtx.range_pop()
+        # rend_img = rend_img[0].cpu().numpy()
 
+        torch.cuda.nvtx.range_push("Post")
 
         scale_ratio = render_size / bbox_size
         img_size_new = int(self.img_size * scale_ratio)
-        bg_img_new = cv2.resize(bg_img, (img_size_new, img_size_new))
+
+        bg_img = torch.transpose(bg_img, 0, 2).unsqueeze(0)
+        bg_img_new = torch.nn.functional.interpolate(bg_img, [img_size_new, img_size_new]).squeeze(0)
+        bg_img_new = torch.transpose(bg_img_new, 0, 2)
 
         x0 = max(int(x0 * scale_ratio), 0)
         y0 = max(int(y0 * scale_ratio), 0)
@@ -178,9 +187,8 @@ class Pytorch3dRenderer(object):
 
         y1 = y0 + h0
         x1 = x0 + w0
-
-        rend_img_new = np.zeros((img_size_new, img_size_new, 4))
-        rend_img_new[y0:y1, x0:x1, :] = rend_img[:h0, :w0, :]
+        rend_img_new = torch.zeros((img_size_new, img_size_new, 4), device='cuda')
+        rend_img_new[y0:y1, x0:x1, :] = rend_img[0, :h0, :w0, :]
         rend_img = rend_img_new
 
         alpha = rend_img[:, :, 3:4]
@@ -190,10 +198,14 @@ class Pytorch3dRenderer(object):
         rend_img = rend_img[:, :, :3] 
         maxColor = rend_img.max()
         rend_img *= 255 /maxColor #Make sure <1.0
-        rend_img = rend_img[:, :, ::-1]
+
+        # torch 1.6 slice does not support negative step
+        # and slice reduce the dimension
+        rend_img = torch.cat((rend_img[:, :, 2].unsqueeze(-1) , rend_img[:, :, 1].unsqueeze(-1), rend_img[:, :, 0].unsqueeze(-1)), 2)
 
         res_img = alpha * rend_img + (1.0 - alpha) * bg_img_new
+        res_img = torch.transpose(res_img, 0, 2).unsqueeze(0)
+        res_img = torch.nn.functional.interpolate(res_img, [self.img_size, self.img_size]).squeeze(0).transpose(0, 2)
 
-        res_img = cv2.resize(res_img, (self.img_size, self.img_size))
-
-        return res_img
+        torch.cuda.nvtx.range_pop()
+        return res_img.cpu().numpy()
