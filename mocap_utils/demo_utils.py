@@ -62,6 +62,8 @@ def __video_setup(args):
     video_dir, video_name, video_basename, ext = gnu.analyze_path(video_path)
     args.seq_name = video_basename
 
+    if args.out_dir is None:
+        return
     if args.save_frame:
         frame_dir = osp.join(args.out_dir, "frames")
         gnu.build_dir(frame_dir)    

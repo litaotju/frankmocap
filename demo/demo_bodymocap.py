@@ -57,11 +57,23 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
             if video_frame < cur_frame:
                 video_frame += 1
                 continue
+
+            width = min(512, img_original_bgr.shape[1])
+            height = min(512, img_original_bgr.shape[0])
+            ratio_w = width / img_original_bgr.shape[1]
+            ratio_h = height / img_original_bgr.shape[0]
+            ratio = min(ratio_w, ratio_h)
+
+            height = int(img_original_bgr.shape[0] * ratio)
+            width = int(img_original_bgr.shape[1] * ratio)
+            img_original_bgr = cv2.resize(img_original_bgr, (width, height), interpolation = cv2.INTER_AREA)
+
+            image_path = None
             # save the obtained video frames
-            image_path = osp.join(args.out_dir, "frames", f"{cur_frame:05d}.jpg")
             if img_original_bgr is not None:
                 video_frame += 1
                 if args.save_frame:
+                    image_path = osp.join(args.out_dir, "frames", f"{cur_frame:05d}.jpg")
                     gnu.make_subdir(image_path)
                     cv2.imwrite(image_path, img_original_bgr)
 
@@ -128,7 +140,7 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
             ImShow(res_img)
 
         # save result image
-        if args.out_dir is not None:
+        if args.save_frame and args.out_dir is not None:
             demo_utils.save_res_img(args.out_dir, image_path, res_img)
 
         # save predictions to pkl

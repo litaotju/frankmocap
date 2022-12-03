@@ -136,10 +136,21 @@ def run_frank_mocap(args, bbox_detector, body_mocap, hand_mocap, visualizer):
 
         elif input_type == 'video':      
             _, img_original_bgr = input_data.read()
+
+            width = min(512, img_original_bgr.shape[1])
+            height = min(512, img_original_bgr.shape[0])
+            ratio_w = width / img_original_bgr.shape[1]
+            ratio_h = height / img_original_bgr.shape[0]
+            ratio = min(ratio_w, ratio_h)
+
+            height = int(img_original_bgr.shape[0] * ratio)
+            width = int(img_original_bgr.shape[1] * ratio)
+            img_original_bgr = cv2.resize(img_original_bgr, (width, height), interpolation = cv2.INTER_AREA)
+
             if video_frame < cur_frame:
                 video_frame += 1
                 continue
-          # save the obtained video frames
+            # save the obtained video frames
             image_path = osp.join(args.out_dir, "frames", f"{cur_frame:05d}.jpg")
             if img_original_bgr is not None:
                 video_frame += 1
@@ -201,7 +212,7 @@ def run_frank_mocap(args, bbox_detector, body_mocap, hand_mocap, visualizer):
             ImShow(res_img)
 
         # save result image
-        if args.out_dir is not None:
+        if args.save_frame and args.out_dir is not None:
             demo_utils.save_res_img(args.out_dir, image_path, res_img)
 
         # save predictions to pkl
