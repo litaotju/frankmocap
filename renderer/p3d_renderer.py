@@ -94,19 +94,20 @@ class Pytorch3dRenderer(object):
                 blend_params=blend_params
             )
         )
+        renderer.to(self.device)
 
         return renderer
     
-
+    @torch.no_grad()
     def render(self, verts, faces, bg_img):
-        verts = verts.copy()
-        faces = faces.copy()
+        verts = torch.from_numpy(verts).to(self.device)
+        faces = torch.from_numpy(faces).to(self.device)
 
         # bbox for verts
-        x0 = int(np.min(verts[:, 0]))
-        x1 = int(np.max(verts[:, 0]))
-        y0 = int(np.min(verts[:, 1]))
-        y1 = int(np.max(verts[:, 1]))
+        x0 = int(torch.min(verts[:, 0]))
+        x1 = int(torch.max(verts[:, 0]))
+        y0 = int(torch.min(verts[:, 1]))
+        y1 = int(torch.max(verts[:, 1]))
         width = x1 - x0
         height = y1 - y0
 
@@ -150,8 +151,8 @@ class Pytorch3dRenderer(object):
         verts[:, 2] /= 112
         verts[:, 2] += 5
 
-        verts_tensor = torch.from_numpy(verts).float().unsqueeze(0).cuda()
-        faces_tensor = torch.from_numpy(faces.copy()).long().unsqueeze(0).cuda()
+        verts_tensor = verts.float().unsqueeze(0).cuda()
+        faces_tensor = faces.long().unsqueeze(0).cuda()
 
         # set color
         mesh_color = self.mesh_color.repeat(1, verts.shape[0], 1)
@@ -166,12 +167,19 @@ class Pytorch3dRenderer(object):
         # blending rendered mesh with background image
         rend_img = renderer(mesh)
         torch.cuda.nvtx.range_pop()
-        # rend_img = rend_img[0].cpu().numpy()
 
         torch.cuda.nvtx.range_push("Post")
 
+        res_img = Pytorch3dRenderer.post(bg_img, rend_img, x0, y0, x1, y1, render_size, bbox_size, self.img_size)
+
+        torch.cuda.nvtx.range_pop()
+        return res_img
+
+    @staticmethod
+    @torch.no_grad()
+    def post(bg_img, rend_img, x0:int, y0:int, x1:int, y1:int, render_size:int, bbox_size:int, img_size: int):
         scale_ratio = render_size / bbox_size
-        img_size_new = int(self.img_size * scale_ratio)
+        img_size_new = int(img_size * scale_ratio)
 
         bg_img = torch.transpose(bg_img, 0, 2).unsqueeze(0)
         bg_img_new = torch.nn.functional.interpolate(bg_img, [img_size_new, img_size_new]).squeeze(0)
@@ -193,7 +201,7 @@ class Pytorch3dRenderer(object):
 
         alpha = rend_img[:, :, 3:4]
         alpha[alpha>0] = 1.0
-        
+    
 
         rend_img = rend_img[:, :, :3] 
         maxColor = rend_img.max()
@@ -205,7 +213,6 @@ class Pytorch3dRenderer(object):
 
         res_img = alpha * rend_img + (1.0 - alpha) * bg_img_new
         res_img = torch.transpose(res_img, 0, 2).unsqueeze(0)
-        res_img = torch.nn.functional.interpolate(res_img, [self.img_size, self.img_size]).squeeze(0).transpose(0, 2)
+        res_img = torch.nn.functional.interpolate(res_img, [img_size, img_size]).squeeze(0).transpose(0, 2)
+        return res_img
 
-        torch.cuda.nvtx.range_pop()
-        return res_img.cpu().numpy()

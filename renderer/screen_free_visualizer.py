@@ -65,7 +65,7 @@ class Visualizer(object):
             rend_img = self.renderer.render(verts, faces, rend_img)
 
         res_img = rend_img[:h, :w, :]
-        return res_img
+        return res_img.detach().cpu().numpy()
 
 
     def visualize(self, 
