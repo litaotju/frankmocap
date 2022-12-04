@@ -185,6 +185,7 @@ def visualize_prediction(args, demo_type, smpl_type, smpl_model, pkl_files, visu
         img_original_bgr = cv2.imread(image_path)
         if img_original_bgr is None:
             print(f"{image_path} does not exists, skip")
+            continue
         
         print("--------------------------------------")
 
@@ -222,6 +223,7 @@ def visualize_prediction(args, demo_type, smpl_type, smpl_model, pkl_files, visu
 
 def main():
     args = DemoOptions().parse()
+    assert args.out_dir is not None, "out_dir is not specified."
 
     # load pkl files
     pkl_files = gnu.get_all_files(args.pkl_dir, ".pkl", "full")
@@ -236,7 +238,7 @@ def main():
     assert args.renderer_type in ['pytorch3d', 'opendr'], \
         f"{args.renderer_type} not implemented yet."
     from renderer.screen_free_visualizer import Visualizer
-    visualizer = Visualizer(args.renderer_type)
+    visualizer = Visualizer(args.renderer_type, device=torch.device('cuda:1'))
 
     # load smpl model
     visualize_prediction(args, demo_type, smpl_type, smpl_model, pkl_files, visualizer)

@@ -32,6 +32,11 @@ def visualize(q, visualizer, args):
     timer = Timer()
 
     while(True):
+        k = cv2.waitKey(33)
+        if k==27 or k == ord('q'):    # Esc key to stop
+            print("Got ESC/Q key. Stopping...")
+            break
+
         timer.tic()
         data = None
         try:
@@ -58,7 +63,7 @@ def visualize(q, visualizer, args):
         del data, img, pred_mesh_list, body_bbox_list, image_path
         timer.toc(bPrint=True,title="Render Time")
 
-def run_body_mocap(q, device, args):
+def run_body_mocap(q, close_signal, device, args):
     # Set bbox detector
     body_bbox_detector = BodyPoseEstimator(device)
 
@@ -75,6 +80,9 @@ def run_body_mocap(q, device, args):
     timer = Timer()
 
     while True:
+        if close_signal.is_set():
+            print("Close signal received, exiting gracefully\n")
+            break
         timer.tic()
         # load data
         load_bbox = False
@@ -115,11 +123,13 @@ def run_body_mocap(q, device, args):
             img_original_bgr = cv2.resize(img_original_bgr, (width, height), interpolation = cv2.INTER_AREA)
 
             image_path = None
+            if args.out_dir is not None:
+                image_path = osp.join(args.out_dir, "frames", f"{cur_frame:05d}.jpg")
             # save the obtained video frames
             if img_original_bgr is not None:
                 video_frame += 1
-                if args.save_frame:
-                    image_path = osp.join(args.out_dir, "frames", f"{cur_frame:05d}.jpg")
+                # If save_pred_pkl is specified, must save the frames, otherwise there is no point
+                if args.save_frame or args.save_pred_pkl:
                     gnu.make_subdir(image_path)
                     cv2.imwrite(image_path, img_original_bgr)
 
@@ -213,14 +223,17 @@ def main():
     mp.set_start_method('spawn')
     max_size = 24
     q = mp.Queue(max_size)
-    p = mp.Process(target=run_body_mocap, args=(q, detect_device, args))
+    close_signal = mp.Event()
+
+    p = mp.Process(target=run_body_mocap, args=(q, close_signal, detect_device, args), daemon=True)
     p.start()
 
     visualize(q, visualizer, args) 
-    p.join()
+
+    # send close signal to the process after visualization done
+    close_signal.set()
 
     cv2.destroyAllWindows()
-
 
 if __name__ == '__main__':
     main()
