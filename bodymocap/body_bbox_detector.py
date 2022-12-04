@@ -9,7 +9,8 @@ from typing import List
 import math
 
 import torch
-import torchvision.transforms as transforms
+from torch.nn import functional as F
+
 # from PIL import Image
 
 # Code from https://github.com/Daniil-Osokin/lightweight-human-pose-estimation.pytorch/blob/master/demo.py
@@ -72,7 +73,7 @@ class BodyPoseEstimator(object):
 
     @staticmethod
     def pad_width(img, stride:int, pad_value:float, min_dims:List[int]):
-        c, h, w = img.shape
+        _, c, h, w = img.shape
 
         h = min(min_dims[0], h)
         min_dims[0] = math.ceil(min_dims[0] / float(stride)) * stride
@@ -98,19 +99,20 @@ class BodyPoseEstimator(object):
         img = torch.from_numpy(img).to(self.device).half()
         # opencv is HWC format, but pytorch is NCHW format
         img = img.permute(2, 0, 1).unsqueeze(0)
-        img = torch.nn.functional.interpolate(img, scale_factor=[scale, scale], mode='bicubic').squeeze(0)
+        img = F.interpolate(img, scale_factor=[scale, scale], mode='bicubic', align_corners=True)
         scaled_img = (img - img_mean) * img_scale
-        min_dims = [input_height_size, max(scaled_img.shape[1], input_height_size)]
+        min_dims = [input_height_size, max(scaled_img.shape[3], input_height_size)]
         padded_img, pad = BodyPoseEstimator.pad_width(scaled_img, stride, pad_value, min_dims)
 
-        tensor_img = padded_img.unsqueeze(0)
-        stages_output = self.model(tensor_img)
+        stages_output = self.model(padded_img)
 
         stage2_heatmaps = stages_output[-2]
-        heatmaps = torch.nn.functional.interpolate(stage2_heatmaps, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).float().cpu().numpy()
+        heatmaps = F.interpolate(stage2_heatmaps, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic', align_corners=True)
+        heatmaps = heatmaps.squeeze(0).permute(1,2,0).float().cpu().numpy()
 
         stage2_pafs = stages_output[-1]
-        pafs = torch.nn.functional.interpolate(stage2_pafs, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).float().cpu().numpy()
+        pafs = F.interpolate(stage2_pafs, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic', align_corners=True)
+        pafs = pafs.squeeze(0).permute(1,2,0).float().cpu().numpy()
 
         DEBUG = 0
         if DEBUG:
