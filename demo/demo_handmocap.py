@@ -169,7 +169,7 @@ def main():
         from renderer.screen_free_visualizer import Visualizer
     else:
         from renderer.visualizer import Visualizer
-    visualizer = Visualizer(args.renderer_type)
+    visualizer = Visualizer(args.renderer_type, device)
 
     # run
     run_hand_mocap(args, bbox_detector, hand_mocap, visualizer)

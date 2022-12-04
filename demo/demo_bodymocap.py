@@ -55,7 +55,7 @@ def visualize(q, visualizer, args):
             ImShow(res_img)
         if args.save_frame and args.out_dir is not None:
             demo_utils.save_res_img(args.out_dir, image_path, res_img)
-        del data
+        del data, img, pred_mesh_list, body_bbox_list, image_path
         timer.toc(bPrint=True,title="Render Time")
 
 def run_body_mocap(q, device, args):

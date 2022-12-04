@@ -42,8 +42,8 @@ class Third_View_Detector(BodyPoseEstimator):
     It combines a body pose estimator (https://github.com/jhugestar/lightweight-human-pose-estimation.pytorch.git)
     with a type-agnostic hand detector (https://github.com/ddshan/hand_detector.d2)
     """
-    def __init__(self):
-        super(Third_View_Detector, self).__init__()
+    def __init__(self, device):
+        super(Third_View_Detector, self).__init__(device)
         print("Loading Third View Hand Detector")
         self.__load_hand_detector()
     
@@ -306,9 +306,9 @@ class HandBboxDetector(object):
         self.view_type = view_type
 
         if view_type == "ego_centric":
-            self.model = Ego_Centric_Detector()
+            self.model = Ego_Centric_Detector(device)
         elif view_type == "third_view":
-            self.model = Third_View_Detector()
+            self.model = Third_View_Detector(device)
         else :
             print("Invalid view_type")
             assert False

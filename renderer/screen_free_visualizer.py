@@ -62,9 +62,15 @@ class Visualizer(object):
         for mesh in pred_mesh_list:
             verts = mesh['vertices']
             faces = mesh['faces']
-            rend_img = self.renderer.render(verts, faces, rend_img)
+            try:
+                rend_img = self.renderer.render(verts, faces, rend_img)
+            except RuntimeError as e:
+                print("Got RuntimeError when rendering mesh. Skip this mesh.")
+                print(e)
+                continue
 
         res_img = rend_img[:h, :w, :]
+        del rend_img
         return res_img.detach().cpu().numpy()
 
 
@@ -80,7 +86,7 @@ class Visualizer(object):
         vis_hand_bbox = True,
     ):
         # init
-        # res_img = input_img.copy()
+        res_img = input_img.copy()
 
         # draw raw hand bboxes
         if raw_hand_bboxes is not None and vis_raw_hand_bbox:
