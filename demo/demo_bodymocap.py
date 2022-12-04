@@ -43,12 +43,12 @@ def visualize(q, visualizer, args):
             break
         img, pred_mesh_list, body_bbox_list, image_path = data
 
-        torch.cuda.nvtx.range_push("Visualize")
+        
         res_img = visualizer.visualize(
             img,
             pred_mesh_list = pred_mesh_list, 
             body_bbox_list = body_bbox_list)
-        torch.cuda.nvtx.range_pop()
+        
         # q.task_done()
         if not args.no_display:
             res_img = res_img.astype(np.uint8)
@@ -78,7 +78,7 @@ def run_body_mocap(q, device, args):
         timer.tic()
         # load data
         load_bbox = False
-        torch.cuda.nvtx.range_push("Read Input")
+        
         if input_type =='image_dir':
             if cur_frame < len(input_data):
                 image_path = input_data[cur_frame]
@@ -138,22 +138,17 @@ def run_body_mocap(q, device, args):
                     cv2.imwrite(image_path, img_original_bgr)
         else:
             assert False, "Unknown input_type"
-        torch.cuda.nvtx.range_pop()
 
-        torch.cuda.nvtx.range_push("Inference bbox")
         cur_frame +=1
         if img_original_bgr is None or cur_frame > args.end_frame:
             break   
         print("--------------------------------------")
-
-        torch.cuda.nvtx.range_push("Inference detect")
 
         if load_bbox:
             body_pose_list = None
         else:
             body_pose_list, body_bbox_list = body_bbox_detector.detect_body_pose(
                 img_original_bgr)
-        torch.cuda.nvtx.range_pop()
         hand_bbox_list = [None, ] * len(body_bbox_list)
 
         # save the obtained body & hand bbox to json file
@@ -171,21 +166,14 @@ def run_body_mocap(q, device, args):
         body_bbox_list = [ body_bbox_list[i] for i in idx_big2small ]
         if args.single_person and len(body_bbox_list)>0:
             body_bbox_list = [body_bbox_list[0], ]       
-        torch.cuda.nvtx.range_pop()
-        torch.cuda.nvtx.range_push("Inference body mocap")
+        
         # Body Pose Regression
-
-        torch.cuda.nvtx.range_push("Inference regress")
         pred_output_list = body_mocap.regress(img_original_bgr, body_bbox_list)
         assert len(body_bbox_list) == len(pred_output_list)
 
-        torch.cuda.nvtx.range_pop()
         # extract mesh for rendering (vertices in image space and faces) from pred_output_list
-        torch.cuda.nvtx.range_push("Inference mesh")
         pred_mesh_list = demo_utils.extract_mesh_from_output(pred_output_list)
-        torch.cuda.nvtx.range_pop()
 
-        torch.cuda.nvtx.range_pop()
         q.put((img_original_bgr, pred_mesh_list, body_bbox_list, image_path))
 
         # save predictions to pkl
@@ -195,7 +183,6 @@ def run_body_mocap(q, device, args):
                 args, demo_type, image_path, body_bbox_list, hand_bbox_list, pred_output_list)
 
         timer.toc(bPrint=True,title="Detect Time")
-        # print(f"Processed : {image_path}")
 
     #save images as a video
     if not args.no_video_out and input_type in ['video', 'webcam']:
@@ -224,7 +211,8 @@ def main():
     visualizer = Visualizer(args.renderer_type, render_device)
 
     mp.set_start_method('spawn')
-    q = mp.Queue()
+    max_size = 24
+    q = mp.Queue(max_size)
     p = mp.Process(target=run_body_mocap, args=(q, detect_device, args))
     p.start()
 

@@ -158,21 +158,15 @@ class Pytorch3dRenderer(object):
         mesh_color = self.mesh_color.repeat(1, verts.shape[0], 1)
         textures = Textures(verts_rgb = mesh_color)
 
-        torch.cuda.nvtx.range_push("Meshes")
         # rendering
         mesh = Meshes(verts=verts_tensor, faces=faces_tensor, textures=textures).to(self.device)
-        torch.cuda.nvtx.range_pop()
 
         torch.cuda.nvtx.range_push("Render")
         # blending rendered mesh with background image
         rend_img = renderer(mesh)
         torch.cuda.nvtx.range_pop()
 
-        torch.cuda.nvtx.range_push("Post")
-
         res_img = self.post(bg_img, rend_img, x0, y0, x1, y1, render_size, bbox_size, self.img_size)
-
-        torch.cuda.nvtx.range_pop()
         return res_img
 
     @torch.no_grad()

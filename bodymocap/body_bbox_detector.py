@@ -137,7 +137,6 @@ class BodyPoseEstimator(object):
         heatmaps, pafs, scale, pad = self.__infer_fast(img, 
             input_height_size=256, stride=stride, upsample_ratio=upsample_ratio)
 
-        torch.cuda.nvtx.range_push("infer postprocess")
         total_keypoints_num = 0
         all_keypoints_by_type = []
         num_keypoints = Pose.num_kpts
@@ -156,9 +155,7 @@ class BodyPoseEstimator(object):
             print("We only support one person currently")
             # assert len(pose_entries) == 1, "We only support one person currently"
         '''
-        torch.cuda.nvtx.range_pop()
 
-        torch.cuda.nvtx.range_push("infer postprocess2")
         current_poses, current_bbox = list(), list()
         for n in range(len(pose_entries)):
             if len(pose_entries[n]) == 0:
@@ -184,5 +181,4 @@ class BodyPoseEstimator(object):
             y1 = min(y+h+y_margin, orig_img.shape[0])
             current_bbox[i] = np.array((x0, y0, x1-x0, y1-y0)).astype(np.int32)
 
-        torch.cuda.nvtx.range_pop()
         return current_poses, current_bbox
