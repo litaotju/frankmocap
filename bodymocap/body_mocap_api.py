@@ -15,9 +15,9 @@ import mocap_utils.geometry_utils as gu
 
 
 class BodyMocap(object):
-    def __init__(self, regressor_checkpoint, smpl_dir, device=torch.device('cuda'), use_smplx=False):
+    def __init__(self, regressor_checkpoint, smpl_dir, device, use_smplx=False):
 
-        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.device = device
 
         # Load parametric model (SMPLX or SMPL)
         if use_smplx:
@@ -38,6 +38,7 @@ class BodyMocap(object):
         self.model_regressor = hmr(SMPL_MEAN_PARAMS).to(self.device)
         checkpoint = torch.load(regressor_checkpoint)
         self.model_regressor.load_state_dict(checkpoint['model'], strict=False)
+        self.model_regressor.to(self.device)
         self.model_regressor.eval()
         
 
@@ -74,7 +75,7 @@ class BodyMocap(object):
 
                 #Convert rot_mat to aa since hands are always in aa
                 # pred_aa = rotmat3x3_to_angle_axis(pred_rotmat)
-                pred_aa = gu.rotation_matrix_to_angle_axis(pred_rotmat).cuda()
+                pred_aa = gu.rotation_matrix_to_angle_axis(pred_rotmat).to(self.device)
                 pred_aa = pred_aa.reshape(pred_aa.shape[0], 72)
                 smpl_output = self.smpl(
                     betas=pred_betas, 

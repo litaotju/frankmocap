@@ -27,7 +27,7 @@ assert g_valid_visualize, "You should import either OpenDR or Pytorch3D"
 
 class Visualizer(object):
 
-    def __init__(self, renderer_backend):
+    def __init__(self, renderer_backend, device):
         colors = {
             # colorbline/print/copy safe:
             'light_gray':  [0.9, 0.9, 0.9],
@@ -35,7 +35,7 @@ class Visualizer(object):
             'light_green': [166/255.0, 178/255.0, 30/255.0],
             'light_blue': [0.65098039, 0.74117647, 0.85882353],
         }
-
+        self.device = device
         self.input_size = 1920
 
         # set-up renderer
@@ -47,16 +47,16 @@ class Visualizer(object):
         else:
             self.renderer = Pytorch3dRenderer(
                 img_size=self.input_size, 
-                mesh_color=colors['light_purple'])
+                mesh_color=colors['light_purple'], device=self.device)
 
 
     def __render_pred_verts(self, img_original, pred_mesh_list):
         assert max(img_original.shape) <= self.input_size, \
             f"Currently, we donlt support images size larger than:{self.input_size}"
 
-        res_img = torch.from_numpy(img_original).to('cuda') # img_original.copy()
+        res_img = torch.from_numpy(img_original).to(self.device)
         h, w = img_original.shape[:2]
-        rend_img = torch.ones((self.input_size, self.input_size, 3), device=torch.device('cuda'))
+        rend_img = torch.ones((self.input_size, self.input_size, 3), device=self.device)
         rend_img[:h, :w, :] = res_img
 
         for mesh in pred_mesh_list:

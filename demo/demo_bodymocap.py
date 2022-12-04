@@ -27,9 +27,12 @@ from renderer.viewer2D import ImShow
 q = queue.Queue()
 
 def visualize(visualizer, args):
+    timer = Timer()
 
     while(True):
+        timer.tic()
         img, pred_mesh_list, body_bbox_list, image_path = q.get()
+
         torch.cuda.nvtx.range_push("Visualize")
         res_img = visualizer.visualize(
             img,
@@ -42,8 +45,7 @@ def visualize(visualizer, args):
             ImShow(res_img)
         if args.save_frame and args.out_dir is not None:
             demo_utils.save_res_img(args.out_dir, image_path, res_img)
-
-
+        timer.toc(bPrint=True,title="Render Time")
 
 def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
     #Setup input data to handle different types of inputs
@@ -83,7 +85,8 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
             if video_frame < cur_frame:
                 video_frame += 1
                 continue
-
+            if img_original_bgr is None:
+                break
             width = min(512, img_original_bgr.shape[1])
             height = min(512, img_original_bgr.shape[0])
             ratio_w = width / img_original_bgr.shape[1]
@@ -126,11 +129,14 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
             break   
         print("--------------------------------------")
 
+        torch.cuda.nvtx.range_push("Inference detect")
+
         if load_bbox:
             body_pose_list = None
         else:
             body_pose_list, body_bbox_list = body_bbox_detector.detect_body_pose(
                 img_original_bgr)
+        torch.cuda.nvtx.range_pop()
         hand_bbox_list = [None, ] * len(body_bbox_list)
 
         # save the obtained body & hand bbox to json file
@@ -151,14 +157,18 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
         torch.cuda.nvtx.range_pop()
         torch.cuda.nvtx.range_push("Inference body mocap")
         # Body Pose Regression
+
+        torch.cuda.nvtx.range_push("Inference regress")
         pred_output_list = body_mocap.regress(img_original_bgr, body_bbox_list)
         assert len(body_bbox_list) == len(pred_output_list)
 
+        torch.cuda.nvtx.range_pop()
         # extract mesh for rendering (vertices in image space and faces) from pred_output_list
+        torch.cuda.nvtx.range_push("Inference mesh")
         pred_mesh_list = demo_utils.extract_mesh_from_output(pred_output_list)
-
         torch.cuda.nvtx.range_pop()
 
+        torch.cuda.nvtx.range_pop()
         q.put((img_original_bgr, pred_mesh_list, body_bbox_list, image_path))
 
         # save predictions to pkl
@@ -167,8 +177,8 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
             demo_utils.save_pred_to_pkl(
                 args, demo_type, image_path, body_bbox_list, hand_bbox_list, pred_output_list)
 
-        timer.toc(bPrint=True,title="Time")
-        print(f"Processed : {image_path}")
+        timer.toc(bPrint=True,title="Detect Time")
+        # print(f"Processed : {image_path}")
 
     q.join()
     #save images as a video
@@ -183,24 +193,29 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
 def main():
     args = DemoOptions().parse()
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    detect_device = torch.device('cpu')
+    render_device = torch.device('cpu') 
+    if torch.cuda.is_available():
+        detect_device = torch.device('cuda:0')
+        render_device = torch.device('cuda:1') if torch.cuda.device_count() > 1 else detect_device
+
     assert torch.cuda.is_available(), "Current version only supports GPU"
 
     # Set bbox detector
-    body_bbox_detector = BodyPoseEstimator()
+    body_bbox_detector = BodyPoseEstimator(detect_device)
 
     # Set mocap regressor
     use_smplx = args.use_smplx
     checkpoint_path = args.checkpoint_body_smplx if use_smplx else args.checkpoint_body_smpl
     print("use_smplx", use_smplx)
-    body_mocap = BodyMocap(checkpoint_path, args.smpl_dir, device, use_smplx)
+    body_mocap = BodyMocap(checkpoint_path, args.smpl_dir, detect_device, use_smplx)
 
     # Set Visualizer
     if args.renderer_type in ['pytorch3d', 'opendr']:
         from renderer.screen_free_visualizer import Visualizer
     else:
         from renderer.visualizer import Visualizer
-    visualizer = Visualizer(args.renderer_type)
+    visualizer = Visualizer(args.renderer_type, render_device)
   
     run_body_mocap(args, body_bbox_detector, body_mocap, visualizer)
 

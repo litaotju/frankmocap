@@ -29,8 +29,9 @@ class BodyPoseEstimator(object):
     Hand Detector for third-view input.
     It combines a body pose estimator (https://github.com/jhugestar/lightweight-human-pose-estimation.pytorch.git)
     """
-    def __init__(self):
+    def __init__(self, device):
         print("Loading Body Pose Estimator")
+        self.device = device
         self.__load_body_estimator()
     
 
@@ -40,8 +41,8 @@ class BodyPoseEstimator(object):
         checkpoint = torch.load(pose2d_checkpoint, map_location='cpu')
         load_state(net, checkpoint)
         net = net.eval()
-        net = net.cuda()
-        self.model = net
+        net = net.to(self.device)
+        self.model = net.half()
 
     def __infer_fast_old(self, img, input_height_size, stride, upsample_ratio, 
         cpu=False, pad_value=(0, 0, 0), img_mean=(128, 128, 128), img_scale=1/256):
@@ -94,7 +95,7 @@ class BodyPoseEstimator(object):
         height, width, _ = img.shape
         scale = input_height_size / height
         org_img = img
-        img = torch.from_numpy(img).cuda().float()
+        img = torch.from_numpy(img).to(self.device).half()
         # opencv is HWC format, but pytorch is NCHW format
         img = img.permute(2, 0, 1).unsqueeze(0)
         img = torch.nn.functional.interpolate(img, scale_factor=[scale, scale], mode='bicubic').squeeze(0)
@@ -106,10 +107,10 @@ class BodyPoseEstimator(object):
         stages_output = self.model(tensor_img)
 
         stage2_heatmaps = stages_output[-2]
-        heatmaps = torch.nn.functional.interpolate(stage2_heatmaps, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).cpu().numpy()
+        heatmaps = torch.nn.functional.interpolate(stage2_heatmaps, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).float().cpu().numpy()
 
         stage2_pafs = stages_output[-1]
-        pafs = torch.nn.functional.interpolate(stage2_pafs, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).cpu().numpy()
+        pafs = torch.nn.functional.interpolate(stage2_pafs, scale_factor=(upsample_ratio, upsample_ratio), mode='bicubic').squeeze(0).permute(1,2,0).float().cpu().numpy()
 
         DEBUG = 0
         if DEBUG:

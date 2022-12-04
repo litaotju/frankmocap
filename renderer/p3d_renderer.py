@@ -24,8 +24,8 @@ from pytorch3d.renderer import (
 
 class Pytorch3dRenderer(object):
 
-    def __init__(self, img_size, mesh_color):
-        self.device = torch.device("cuda:0")
+    def __init__(self, img_size, mesh_color, device):
+        self.device = device
         # self.render_size = 1920
 
         self.img_size = img_size
@@ -151,8 +151,8 @@ class Pytorch3dRenderer(object):
         verts[:, 2] /= 112
         verts[:, 2] += 5
 
-        verts_tensor = verts.float().unsqueeze(0).cuda()
-        faces_tensor = faces.long().unsqueeze(0).cuda()
+        verts_tensor = verts.float().unsqueeze(0)
+        faces_tensor = faces.long().unsqueeze(0)
 
         # set color
         mesh_color = self.mesh_color.repeat(1, verts.shape[0], 1)
@@ -160,7 +160,7 @@ class Pytorch3dRenderer(object):
 
         torch.cuda.nvtx.range_push("Meshes")
         # rendering
-        mesh = Meshes(verts=verts_tensor, faces=faces_tensor, textures=textures)
+        mesh = Meshes(verts=verts_tensor, faces=faces_tensor, textures=textures).to(self.device)
         torch.cuda.nvtx.range_pop()
 
         torch.cuda.nvtx.range_push("Render")
@@ -170,14 +170,13 @@ class Pytorch3dRenderer(object):
 
         torch.cuda.nvtx.range_push("Post")
 
-        res_img = Pytorch3dRenderer.post(bg_img, rend_img, x0, y0, x1, y1, render_size, bbox_size, self.img_size)
+        res_img = self.post(bg_img, rend_img, x0, y0, x1, y1, render_size, bbox_size, self.img_size)
 
         torch.cuda.nvtx.range_pop()
         return res_img
 
-    @staticmethod
     @torch.no_grad()
-    def post(bg_img, rend_img, x0:int, y0:int, x1:int, y1:int, render_size:int, bbox_size:int, img_size: int):
+    def post(self, bg_img, rend_img, x0:int, y0:int, x1:int, y1:int, render_size:int, bbox_size:int, img_size: int):
         scale_ratio = render_size / bbox_size
         img_size_new = int(img_size * scale_ratio)
 
@@ -195,7 +194,7 @@ class Pytorch3dRenderer(object):
 
         y1 = y0 + h0
         x1 = x0 + w0
-        rend_img_new = torch.zeros((img_size_new, img_size_new, 4), device='cuda')
+        rend_img_new = torch.zeros((img_size_new, img_size_new, 4), device=self.device)
         rend_img_new[y0:y1, x0:x1, :] = rend_img[0, :h0, :w0, :]
         rend_img = rend_img_new
 
