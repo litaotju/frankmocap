@@ -8,6 +8,8 @@ from torchvision.transforms import Normalize
 import numpy as np
 import queue
 import threading
+import torch.multiprocessing as mp
+
 import cv2
 import argparse
 import json
@@ -24,14 +26,22 @@ from mocap_utils.timer import Timer
 import renderer.image_utils as imu
 from renderer.viewer2D import ImShow
 
-q = queue.Queue()
 
-def visualize(visualizer, args):
+
+def visualize(q, visualizer, args):
     timer = Timer()
 
     while(True):
         timer.tic()
-        img, pred_mesh_list, body_bbox_list, image_path = q.get()
+        data = None
+        try:
+            data = q.get(timeout=10)
+        except queue.Empty:
+            print("Queue is empty")
+            break
+        if data is None:
+            break
+        img, pred_mesh_list, body_bbox_list, image_path = data
 
         torch.cuda.nvtx.range_push("Visualize")
         res_img = visualizer.visualize(
@@ -39,23 +49,30 @@ def visualize(visualizer, args):
             pred_mesh_list = pred_mesh_list, 
             body_bbox_list = body_bbox_list)
         torch.cuda.nvtx.range_pop()
-        q.task_done()
+        # q.task_done()
         if not args.no_display:
             res_img = res_img.astype(np.uint8)
             ImShow(res_img)
         if args.save_frame and args.out_dir is not None:
             demo_utils.save_res_img(args.out_dir, image_path, res_img)
+        del data
         timer.toc(bPrint=True,title="Render Time")
 
-def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
+def run_body_mocap(q, device, args):
+    # Set bbox detector
+    body_bbox_detector = BodyPoseEstimator(device)
+
+    # Set mocap regressor
+    use_smplx = args.use_smplx
+    checkpoint_path = args.checkpoint_body_smplx if use_smplx else args.checkpoint_body_smpl
+    body_mocap = BodyMocap(checkpoint_path, args.smpl_dir, device, use_smplx)
+
     #Setup input data to handle different types of inputs
     input_type, input_data = demo_utils.setup_input(args)
 
     cur_frame = args.start_frame
     video_frame = 0
     timer = Timer()
-
-    threading.Thread(target=visualize, args=(visualizer, args), daemon=True).start()
 
     while True:
         timer.tic()
@@ -180,14 +197,12 @@ def run_body_mocap(args, body_bbox_detector, body_mocap, visualizer):
         timer.toc(bPrint=True,title="Detect Time")
         # print(f"Processed : {image_path}")
 
-    q.join()
     #save images as a video
     if not args.no_video_out and input_type in ['video', 'webcam']:
         demo_utils.gen_video_out(args.out_dir, args.seq_name)
 
     if input_type =='webcam' and input_data is not None:
         input_data.release()
-    cv2.destroyAllWindows()
 
 
 def main():
@@ -201,23 +216,22 @@ def main():
 
     assert torch.cuda.is_available(), "Current version only supports GPU"
 
-    # Set bbox detector
-    body_bbox_detector = BodyPoseEstimator(detect_device)
-
-    # Set mocap regressor
-    use_smplx = args.use_smplx
-    checkpoint_path = args.checkpoint_body_smplx if use_smplx else args.checkpoint_body_smpl
-    print("use_smplx", use_smplx)
-    body_mocap = BodyMocap(checkpoint_path, args.smpl_dir, detect_device, use_smplx)
-
     # Set Visualizer
     if args.renderer_type in ['pytorch3d', 'opendr']:
         from renderer.screen_free_visualizer import Visualizer
     else:
         from renderer.visualizer import Visualizer
     visualizer = Visualizer(args.renderer_type, render_device)
-  
-    run_body_mocap(args, body_bbox_detector, body_mocap, visualizer)
+
+    mp.set_start_method('spawn')
+    q = mp.Queue()
+    p = mp.Process(target=run_body_mocap, args=(q, detect_device, args))
+    p.start()
+
+    visualize(q, visualizer, args) 
+    p.join()
+
+    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
