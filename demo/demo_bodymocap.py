@@ -32,7 +32,7 @@ def visualize(q, visualizer, args):
     timer = Timer()
 
     while(True):
-        k = cv2.waitKey(33)
+        k = cv2.waitKey(1)
         if k==27 or k == ord('q'):    # Esc key to stop
             print("Got ESC/Q key. Stopping...")
             break
